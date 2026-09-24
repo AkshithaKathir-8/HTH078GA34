@@ -195,6 +195,160 @@ def explain_operation(
             ),
         ]
 
+    # =========================================================
+    # DATA DETECTIVE FEATURES
+    # =========================================================
+
+    # ---------------------------------------------------------
+    # Duplicate Detection
+    # ---------------------------------------------------------
+
+    if operation_type == "duplicate_detection":
+
+        duplicate_count = result.get(
+            "duplicate_row_count",
+            0,
+        )
+
+        duplicate_groups = result.get(
+            "duplicate_group_count",
+            0,
+        )
+
+        if result.get("has_duplicates"):
+
+            return [
+                "Compared complete rows across the dataset.",
+                (
+                    f"Found {_format_value(duplicate_count)} "
+                    f"record(s) that belong to duplicate groups."
+                ),
+                (
+                    f"Detected {_format_value(duplicate_groups)} "
+                    f"duplicated record group(s)."
+                ),
+            ]
+
+        return [
+            "Compared complete rows across the dataset.",
+            "No completely duplicated records were detected.",
+        ]
+
+    # ---------------------------------------------------------
+    # Anomaly Detection
+    # ---------------------------------------------------------
+
+    if operation_type == "anomaly_detection":
+
+        anomaly_count = result.get(
+            "anomaly_count",
+            0,
+        )
+
+        columns = result.get(
+            "columns_checked",
+            [],
+        )
+
+        method = result.get(
+            "method",
+            "IQR",
+        )
+
+        if anomaly_count > 0:
+
+            return [
+                (
+                    f"Checked numeric column(s) "
+                    f"{', '.join(str(column) for column in columns)} "
+                    f"for unusual values."
+                ),
+                (
+                    f"Used the {method} statistical method "
+                    f"to identify potential outliers."
+                ),
+                (
+                    f"Found {_format_value(anomaly_count)} "
+                    f"potential anomalous record(s)."
+                ),
+            ]
+
+        return [
+            (
+                f"Checked numeric column(s) "
+                f"{', '.join(str(column) for column in columns)}."
+            ),
+            (
+                f"Used the {method} method to identify "
+                "potential outliers."
+            ),
+            "No potential anomalies were detected.",
+        ]
+
+    # ---------------------------------------------------------
+    # Pattern Detection
+    # ---------------------------------------------------------
+
+    if operation_type == "pattern_detection":
+
+        pattern_count = result.get(
+            "patterns_found",
+            0,
+        )
+
+        columns = result.get(
+            "columns_checked",
+            [],
+        )
+
+        explanation = [
+            (
+                f"Inspected {len(columns)} dataset column(s) "
+                "for measurable patterns."
+            ),
+            (
+                "Analyzed numeric distributions, category "
+                "concentrations, and relationships between "
+                "numeric columns."
+            ),
+            (
+                f"Found {_format_value(pattern_count)} "
+                f"measurable pattern(s)."
+            ),
+        ]
+
+        return explanation
+
+    # ---------------------------------------------------------
+    # Recommendations
+    # ---------------------------------------------------------
+
+    if operation_type == "recommendation":
+
+        findings = result.get(
+            "findings",
+            [],
+        )
+
+        recommendations = result.get(
+            "recommendations",
+            [],
+        )
+
+        explanation = [
+            "Inspected the uploaded dataset for measurable findings.",
+            (
+                f"Identified {_format_value(len(findings))} "
+                "data-driven finding(s)."
+            ),
+            (
+                f"Generated {_format_value(len(recommendations))} "
+                "evidence-based recommendation(s)."
+            ),
+        ]
+
+        return explanation
+
     # ---------------------------------------------------------
     # Unsupported
     # ---------------------------------------------------------

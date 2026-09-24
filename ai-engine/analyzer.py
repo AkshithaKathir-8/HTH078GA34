@@ -260,7 +260,6 @@ def filter_data(
 
     filtered = df.loc[mask].copy()
 
-    # Convert values to JSON-friendly records.
     records = []
 
     for record in filtered.to_dict(orient="records"):
@@ -279,6 +278,440 @@ def filter_data(
         },
     }
 
+
+# ============================================================
+# DATA DETECTIVE FEATURES
+# ============================================================
+
+def detect_duplicates(df: pd.DataFrame) -> dict:
+    """
+    Detect completely duplicated rows in the dataset.
+    """
+
+    duplicate_mask = df.duplicated(keep=False)
+    duplicates = df.loc[duplicate_mask].copy()
+
+    records = []
+
+    for record in duplicates.to_dict(orient="records"):
+        records.append({
+            key: _clean_result(value)
+            for key, value in record.items()
+        })
+
+    duplicate_row_count = int(len(duplicates))
+    duplicate_group_count = int(
+        df.duplicated(keep="first").sum()
+    )
+
+    return {
+        "duplicate_row_count": duplicate_row_count,
+        "duplicate_group_count": duplicate_group_count,
+        "data": records,
+        "has_duplicates": duplicate_row_count > 0,
+    }
+
+
+def detect_anomalies(
+    df: pd.DataFrame,
+    columns: list[str],
+) -> dict:
+    """
+    Detect numerical outliers using the IQR method.
+
+    Values below Q1 - 1.5*IQR or above Q3 + 1.5*IQR
+    are treated as potential anomalies.
+    """
+
+    if not columns:
+        raise AnalysisError(
+            "No numeric columns were provided for anomaly detection."
+        )
+
+    all_anomalies = []
+
+    for column in columns:
+
+        _ensure_column(df, column)
+
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            continue
+
+        series = pd.to_numeric(
+            df[column],
+            errors="coerce"
+        ).dropna()
+
+        if len(series) < 4:
+            continue
+
+        q1 = series.quantile(0.25)
+        q3 = series.quantile(0.75)
+
+        iqr = q3 - q1
+
+        if iqr == 0:
+            continue
+
+        lower_bound = q1 - (1.5 * iqr)
+        upper_bound = q3 + (1.5 * iqr)
+
+        anomaly_mask = (
+            (pd.to_numeric(df[column], errors="coerce") < lower_bound)
+            |
+            (pd.to_numeric(df[column], errors="coerce") > upper_bound)
+        )
+
+        anomaly_rows = df.loc[anomaly_mask].copy()
+
+        for index, row in anomaly_rows.iterrows():
+
+            record = {
+                key: _clean_result(value)
+                for key, value in row.to_dict().items()
+            }
+
+            record["_anomaly_column"] = column
+            record["_anomaly_value"] = _clean_result(
+                row[column]
+            )
+            record["_lower_bound"] = _clean_result(
+                lower_bound
+            )
+            record["_upper_bound"] = _clean_result(
+                upper_bound
+            )
+
+            all_anomalies.append(record)
+
+    return {
+        "anomaly_count": len(all_anomalies),
+        "columns_checked": columns,
+        "method": "IQR",
+        "data": all_anomalies,
+        "has_anomalies": len(all_anomalies) > 0,
+    }
+
+
+def detect_patterns(
+    df: pd.DataFrame,
+    columns: list[str],
+) -> dict:
+    """
+    Automatically inspect the dataset for useful patterns.
+
+    This does not guess business conclusions.
+    It reports measurable characteristics found in the data.
+    """
+
+    if not columns:
+        raise AnalysisError(
+            "No columns were provided for pattern detection."
+        )
+
+    patterns = []
+
+    numeric_columns = [
+        column
+        for column in columns
+        if column in df.columns
+        and pd.api.types.is_numeric_dtype(df[column])
+    ]
+
+    categorical_columns = [
+        column
+        for column in columns
+        if column in df.columns
+        and not pd.api.types.is_numeric_dtype(df[column])
+    ]
+
+    # --------------------------------------------------------
+    # Numeric patterns
+    # --------------------------------------------------------
+
+    for column in numeric_columns:
+
+        series = pd.to_numeric(
+            df[column],
+            errors="coerce"
+        ).dropna()
+
+        if series.empty:
+            continue
+
+        mean_value = series.mean()
+        median_value = series.median()
+        min_value = series.min()
+        max_value = series.max()
+
+        patterns.append({
+            "type": "numeric_summary",
+            "column": column,
+            "mean": _clean_result(mean_value),
+            "median": _clean_result(median_value),
+            "minimum": _clean_result(min_value),
+            "maximum": _clean_result(max_value),
+        })
+
+        if mean_value > median_value * 1.2:
+            patterns.append({
+                "type": "distribution_pattern",
+                "column": column,
+                "finding": (
+                    "Mean is substantially higher than median, "
+                    "which may indicate high-value observations."
+                ),
+            })
+
+        elif median_value > mean_value * 1.2:
+            patterns.append({
+                "type": "distribution_pattern",
+                "column": column,
+                "finding": (
+                    "Median is substantially higher than mean, "
+                    "which may indicate lower-value observations."
+                ),
+            })
+
+    # --------------------------------------------------------
+    # Categorical patterns
+    # --------------------------------------------------------
+
+    for column in categorical_columns:
+
+        unique_count = int(df[column].nunique(dropna=True))
+
+        if unique_count == 0:
+            continue
+
+        value_counts = (
+            df[column]
+            .value_counts(dropna=False)
+        )
+
+        top_value = value_counts.index[0]
+        top_count = int(value_counts.iloc[0])
+
+        patterns.append({
+            "type": "category_distribution",
+            "column": column,
+            "unique_values": unique_count,
+            "most_common_value": _clean_result(top_value),
+            "most_common_count": top_count,
+        })
+
+        if top_count / len(df) >= 0.5:
+            patterns.append({
+                "type": "concentration_pattern",
+                "column": column,
+                "finding": (
+                    f"'{_clean_result(top_value)}' represents "
+                    f"{round((top_count / len(df)) * 100, 2)}% "
+                    "of the records."
+                ),
+            })
+
+    # --------------------------------------------------------
+    # Numeric correlations
+    # --------------------------------------------------------
+
+    if len(numeric_columns) >= 2:
+
+        correlation_matrix = df[numeric_columns].corr()
+
+        for i, first_column in enumerate(numeric_columns):
+
+            for second_column in numeric_columns[i + 1:]:
+
+                correlation = correlation_matrix.loc[
+                    first_column,
+                    second_column
+                ]
+
+                if pd.isna(correlation):
+                    continue
+
+                correlation_value = float(correlation)
+
+                if abs(correlation_value) >= 0.7:
+
+                    direction = (
+                        "positive"
+                        if correlation_value > 0
+                        else "negative"
+                    )
+
+                    patterns.append({
+                        "type": "relationship",
+                        "columns": [
+                            first_column,
+                            second_column,
+                        ],
+                        "correlation": round(
+                            correlation_value,
+                            3
+                        ),
+                        "finding": (
+                            f"Strong {direction} relationship "
+                            f"between '{first_column}' and "
+                            f"'{second_column}'."
+                        ),
+                    })
+
+    return {
+        "columns_checked": columns,
+        "patterns_found": len(patterns),
+        "data": patterns,
+    }
+
+
+def generate_recommendations(
+    df: pd.DataFrame,
+) -> dict:
+    """
+    Generate evidence-based recommendations from measurable
+    characteristics of the uploaded dataset.
+    """
+
+    recommendations = []
+    findings = []
+
+    numeric_columns = [
+        column
+        for column in df.columns
+        if pd.api.types.is_numeric_dtype(df[column])
+    ]
+
+    categorical_columns = [
+        column
+        for column in df.columns
+        if not pd.api.types.is_numeric_dtype(df[column])
+    ]
+
+    # --------------------------------------------------------
+    # Find potentially important numeric columns
+    # --------------------------------------------------------
+
+    if numeric_columns:
+
+        highest_variance_column = max(
+            numeric_columns,
+            key=lambda column: (
+                pd.to_numeric(
+                    df[column],
+                    errors="coerce"
+                ).var()
+                if not df[column].dropna().empty
+                else 0
+            )
+        )
+
+        findings.append({
+            "type": "highest_variability",
+            "column": highest_variance_column,
+        })
+
+        recommendations.append(
+            f"Investigate variation in '{highest_variance_column}' "
+            "to identify the factors causing large differences."
+        )
+
+    # --------------------------------------------------------
+    # Look for dominant categories
+    # --------------------------------------------------------
+
+    for column in categorical_columns:
+
+        counts = df[column].value_counts(
+            dropna=False
+        )
+
+        if counts.empty:
+            continue
+
+        top_value = counts.index[0]
+        top_count = int(counts.iloc[0])
+
+        share = top_count / len(df)
+
+        if share >= 0.5:
+
+            findings.append({
+                "type": "dominant_category",
+                "column": column,
+                "value": _clean_result(top_value),
+                "share": round(share * 100, 2),
+            })
+
+            recommendations.append(
+                f"Review the dominant '{column}' value "
+                f"'{_clean_result(top_value)}' because it represents "
+                f"{round(share * 100, 2)}% of the records."
+            )
+
+    # --------------------------------------------------------
+    # Detect potential anomalies
+    # --------------------------------------------------------
+
+    for column in numeric_columns:
+
+        series = pd.to_numeric(
+            df[column],
+            errors="coerce"
+        ).dropna()
+
+        if len(series) < 4:
+            continue
+
+        q1 = series.quantile(0.25)
+        q3 = series.quantile(0.75)
+        iqr = q3 - q1
+
+        if iqr == 0:
+            continue
+
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+
+        anomaly_count = int(
+            ((series < lower) | (series > upper)).sum()
+        )
+
+        if anomaly_count > 0:
+
+            findings.append({
+                "type": "anomalies",
+                "column": column,
+                "count": anomaly_count,
+            })
+
+            recommendations.append(
+                f"Investigate {anomaly_count} unusual "
+                f"record(s) in '{column}' before making "
+                "business decisions."
+            )
+
+    # --------------------------------------------------------
+    # Safe fallback recommendation
+    # --------------------------------------------------------
+
+    if not recommendations:
+
+        recommendations.append(
+            "No strong automated recommendation was found. "
+            "Consider examining relationships, distributions, "
+            "and unusual records in the dataset."
+        )
+
+    return {
+        "recommendations": recommendations,
+        "findings": findings,
+    }
+
+
+# ============================================================
+# OPERATION ROUTER
+# ============================================================
 
 def execute_operation(
     df: pd.DataFrame,
@@ -325,6 +758,28 @@ def execute_operation(
             operation["operator"],
             operation["value"],
         )
+
+    # ========================================================
+    # DATA DETECTIVE OPERATIONS
+    # ========================================================
+
+    if operation_type == "duplicate_detection":
+        return detect_duplicates(df)
+
+    if operation_type == "anomaly_detection":
+        return detect_anomalies(
+            df,
+            operation.get("columns", []),
+        )
+
+    if operation_type == "pattern_detection":
+        return detect_patterns(
+            df,
+            operation.get("columns", list(df.columns)),
+        )
+
+    if operation_type == "recommendation":
+        return generate_recommendations(df)
 
     if operation_type == "unsupported":
         raise AnalysisError(

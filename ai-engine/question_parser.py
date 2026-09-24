@@ -1,237 +1,384 @@
-import json
 import os
 import re
-from typing import Any
+import json
+from typing import Any, Dict, List, Optional
 
-from openai import OpenAI
+from dotenv import load_dotenv
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
+
+load_dotenv()
 
 
 class QuestionParser:
     """
-    Converts a natural-language question into a structured
-    analysis operation.
+    Converts a natural-language question into a structured analysis operation.
 
-    OpenAI is the primary parser.
-    A local fallback parser is used when the API is unavailable.
-
-    Pandas performs the actual calculation.
+    OpenAI is used when available.
+    If OpenAI is unavailable, a local rule-based parser is used.
     """
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-
         self.client = None
 
-        if self.api_key:
-            self.client = OpenAI(api_key=self.api_key)
+        if self.api_key and OpenAI is not None:
+            try:
+                self.client = OpenAI(api_key=self.api_key)
+            except Exception:
+                self.client = None
 
-    def parse(
-        self,
-        question: str,
-        schema_summary: str
-    ) -> dict[str, Any]:
+    # ---------------------------------------------------------
+    # PUBLIC METHOD
+    # ---------------------------------------------------------
 
-        if not question or not question.strip():
-            raise ValueError("Question cannot be empty.")
+    def parse(self, question: str, schema_summary: str) -> Dict[str, Any]:
+
+        question = question.strip()
+
+        if not question:
+            return {
+                "operation": "unsupported",
+                "reason": "Question cannot be empty."
+            }
 
         # Try OpenAI first
         if self.client:
             try:
-                return self._parse_with_llm(
+                result = self._parse_with_openai(
                     question,
                     schema_summary
                 )
-            except Exception as exc:
-                print(
-                    f"\n[INFO] OpenAI unavailable: {exc}"
-                )
-                print(
-                    "[INFO] Switching to local fallback parser..."
-                )
 
-        # Use local parser if OpenAI is unavailable
+                if result:
+                    return result
+
+            except Exception as exc:
+                print(f"[INFO] OpenAI unavailable: {exc}")
+
+        # Local fallback
+        print("[INFO] Switching to local fallback parser...")
+
         return self._parse_locally(
             question,
             schema_summary
         )
 
-    # =========================================================
+    # ---------------------------------------------------------
     # OPENAI PARSER
-    # =========================================================
+    # ---------------------------------------------------------
 
-    def _parse_with_llm(
+    def _parse_with_openai(
         self,
         question: str,
         schema_summary: str
-    ) -> dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
 
         prompt = f"""
-You are the question-understanding component of a
-schema-agnostic data analysis system.
+You are a data-analysis intent parser.
 
-Your job is ONLY to understand the user's question and
-convert it into a structured JSON analysis operation.
+The user has uploaded a dataset.
 
-Do NOT calculate the answer.
-Do NOT invent data.
-Do NOT return the final answer.
-
-The actual calculation will be performed by Pandas.
-
-DATASET SCHEMA
---------------
+Dataset schema:
 {schema_summary}
 
-USER QUESTION
--------------
+User question:
 {question}
 
-SUPPORTED OPERATIONS
+Return ONLY valid JSON.
+
+Supported operations:
 
 1. aggregate
-
-Format:
 {{
-  "operation": "aggregate",
-  "value_column": "column",
-  "aggregation": "sum|mean|min|max|median"
+    "operation": "aggregate",
+    "value_column": "column",
+    "aggregation": "sum|mean|median|min|max"
 }}
 
 2. count
-
-Format:
 {{
-  "operation": "count"
+    "operation": "count"
 }}
 
 3. groupby_aggregate
-
-Format:
 {{
-  "operation": "groupby_aggregate",
-  "group_column": "column",
-  "value_column": "column",
-  "aggregation": "sum|mean|min|max|median",
-  "sort": "ascending|descending|null",
-  "limit": number or null
+    "operation": "groupby_aggregate",
+    "group_column": "column",
+    "value_column": "column",
+    "aggregation": "sum|mean|median|min|max",
+    "sort": "ascending|descending",
+    "limit": 1
 }}
 
 4. value_count
-
-Format:
 {{
-  "operation": "value_count",
-  "group_column": "column",
-  "sort": "ascending|descending|null",
-  "limit": number or null
+    "operation": "value_count",
+    "column": "column"
 }}
 
 5. filter
-
-Format:
 {{
-  "operation": "filter",
-  "column": "column",
-  "operator": "equals|not_equals|greater_than|less_than|greater_or_equal|less_or_equal|contains",
-  "value": "value"
+    "operation": "filter",
+    "column": "column",
+    "operator": "==|!=|>|<|>=|<=",
+    "value": "value"
 }}
 
-6. unsupported
-
-Format:
+6. duplicate_detection
 {{
-  "operation": "unsupported",
-  "reason": "short explanation"
+    "operation": "duplicate_detection"
 }}
 
-RULES
+7. anomaly_detection
+{{
+    "operation": "anomaly_detection",
+    "columns": ["numeric_column"]
+}}
 
-- Column names MUST exactly match the supplied schema.
-- Never invent a column.
-- For highest, use descending and limit=1.
-- For lowest, use ascending and limit=1.
-- For top N, use descending and limit=N.
-- For bottom N, use ascending and limit=N.
-- Return ONLY valid JSON.
+8. pattern_detection
+{{
+    "operation": "pattern_detection",
+    "columns": ["column1", "column2"]
+}}
+
+9. recommendation
+{{
+    "operation": "recommendation"
+}}
+
+10. unsupported
+{{
+    "operation": "unsupported",
+    "reason": "reason"
+}}
+
+Rules:
+
+- Use only columns that exist in the schema.
+- Do not invent column names.
+- For questions such as:
+  "Which country has the highest total quantity?"
+  group_column = Country
+  value_column = Quantity
+  aggregation = sum
+  sort = descending
+  limit = 1
+
+- For:
+  "What are the top 5 countries by total quantity?"
+  group_column = Country
+  value_column = Quantity
+  aggregation = sum
+  sort = descending
+  limit = 5
+
+- For:
+  "What are the bottom 3 countries by total quantity?"
+  group_column = Country
+  value_column = Quantity
+  aggregation = sum
+  sort = ascending
+  limit = 3
+
+Return JSON only.
 """
 
         response = self.client.responses.create(
-            model="gpt-5-mini",
-            input=prompt,
+            model="gpt-4.1-mini",
+            input=prompt
         )
 
-        raw_output = response.output_text.strip()
+        text = response.output_text.strip()
 
         try:
-            operation = json.loads(raw_output)
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                f"LLM returned invalid JSON: {raw_output}"
-            ) from exc
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return None
 
-        self._validate_operation(
-            operation,
-            schema_summary
-        )
-
-        return operation
-
-    # =========================================================
-    # LOCAL FALLBACK PARSER
-    # =========================================================
+    # ---------------------------------------------------------
+    # LOCAL PARSER
+    # ---------------------------------------------------------
 
     def _parse_locally(
         self,
         question: str,
         schema_summary: str
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
 
-        question_lower = question.lower().strip()
+        question_lower = question.lower()
 
         columns = self._extract_columns(
             schema_summary
         )
 
-        if not columns:
+        # -----------------------------------------------------
+        # DUPLICATE DETECTION
+        # -----------------------------------------------------
+
+        duplicate_phrases = [
+            "duplicate",
+            "duplicates",
+            "duplicated records",
+            "duplicate records",
+            "duplicate rows",
+            "repeated records",
+            "repeated rows"
+        ]
+
+        if any(
+            phrase in question_lower
+            for phrase in duplicate_phrases
+        ):
             return {
-                "operation": "unsupported",
-                "reason": (
-                    "The dataset schema could not be "
-                    "understood by the local parser."
-                ),
+                "operation": "duplicate_detection"
+            }
+
+        # -----------------------------------------------------
+        # ANOMALY DETECTION
+        # -----------------------------------------------------
+
+        anomaly_phrases = [
+            "anomaly",
+            "anomalies",
+            "anomalous",
+            "outlier",
+            "outliers",
+            "unusual",
+            "unusual values",
+            "anything unusual",
+            "abnormal",
+            "abnormalities"
+        ]
+
+        if any(
+            phrase in question_lower
+            for phrase in anomaly_phrases
+        ):
+
+            numeric_columns = [
+                column["name"]
+                for column in columns
+                if column["semantic_type"] == "numeric"
+            ]
+
+            mentioned_numeric_columns = []
+
+            for column in columns:
+
+                if column["semantic_type"] != "numeric":
+                    continue
+
+                if self._column_mentioned(
+                    column["name"],
+                    question_lower
+                ):
+                    mentioned_numeric_columns.append(
+                        column["name"]
+                    )
+
+            if mentioned_numeric_columns:
+                numeric_columns = mentioned_numeric_columns
+
+            return {
+                "operation": "anomaly_detection",
+                "columns": numeric_columns
+            }
+
+        # -----------------------------------------------------
+        # PATTERN / TREND DETECTION
+        # -----------------------------------------------------
+
+        pattern_phrases = [
+            "what patterns",
+            "patterns do you see",
+            "find patterns",
+            "interesting patterns",
+            "trends",
+            "trend",
+            "what is happening",
+            "what do you notice",
+            "insights from the data",
+            "interesting insights",
+            "analyze this data",
+            "analyse this data"
+        ]
+
+        if any(
+            phrase in question_lower
+            for phrase in pattern_phrases
+        ):
+            return {
+                "operation": "pattern_detection",
+                "columns": [
+                    column["name"]
+                    for column in columns
+                ]
+            }
+
+        # -----------------------------------------------------
+        # RECOMMENDATIONS
+        # -----------------------------------------------------
+
+        recommendation_phrases = [
+            "what should i do",
+            "what should we do",
+            "what can i do",
+            "what can we do",
+            "how can i improve",
+            "how can we improve",
+            "how to improve",
+            "how can i increase",
+            "how can we increase",
+            "how to increase",
+            "increase sales",
+            "increase revenue",
+            "grow sales",
+            "grow revenue",
+            "improve sales",
+            "improve revenue",
+            "what actions should i take",
+            "what actions should we take",
+            "recommendations",
+            "recommendation",
+            "suggestions",
+            "suggest"
+        ]
+
+        if any(
+            phrase in question_lower
+            for phrase in recommendation_phrases
+        ):
+            return {
+                "operation": "recommendation"
             }
 
         # -----------------------------------------------------
         # COUNT
         # -----------------------------------------------------
 
+        count_phrases = [
+            "how many records",
+            "how many rows",
+            "number of records",
+            "number of rows",
+            "record count",
+            "row count",
+            "how many entries",
+            "how many items"
+        ]
+
         if any(
             phrase in question_lower
-            for phrase in [
-                "how many records",
-                "how many rows",
-                "how many entries",
-                "number of records",
-                "number of rows",
-            ]
+            for phrase in count_phrases
         ):
             return {
                 "operation": "count"
             }
-
-        # -----------------------------------------------------
-        # FIND COLUMNS
-        # -----------------------------------------------------
-
-        group_column = self._find_column(
-            question_lower,
-            columns
-        )
-
-        value_column = self._find_numeric_column(
-            question_lower,
-            columns
-        )
 
         # -----------------------------------------------------
         # AGGREGATION
@@ -242,40 +389,19 @@ RULES
         )
 
         # -----------------------------------------------------
-        # SORTING
+        # GROUP + VALUE DETECTION
         # -----------------------------------------------------
 
-        sort = None
-        limit = None
-
-        if any(
-            word in question_lower
-            for word in [
-                "highest",
-                "largest",
-                "maximum",
-                "max",
-                "top",
-                "most",
-            ]
-        ):
-            sort = "descending"
-
-        elif any(
-            word in question_lower
-            for word in [
-                "lowest",
-                "smallest",
-                "minimum",
-                "min",
-                "bottom",
-                "least",
-            ]
-        ):
-            sort = "ascending"
+        (
+            group_column,
+            value_column
+        ) = self._find_group_and_value_columns(
+            question_lower,
+            columns
+        )
 
         # -----------------------------------------------------
-        # TOP N / BOTTOM N
+        # TOP / BOTTOM N
         # -----------------------------------------------------
 
         number_match = re.search(
@@ -284,77 +410,140 @@ RULES
         )
 
         if number_match:
+
             limit = int(
                 number_match.group(2)
             )
 
-        elif sort is not None:
-            limit = 1
+            direction = number_match.group(1)
+
+            sort = (
+                "descending"
+                if direction == "top"
+                else "ascending"
+            )
+
+            if group_column and value_column:
+
+                return {
+                    "operation": "groupby_aggregate",
+                    "group_column": group_column,
+                    "value_column": value_column,
+                    "aggregation": aggregation or "sum",
+                    "sort": sort,
+                    "limit": limit
+                }
 
         # -----------------------------------------------------
-        # GROUP BY
+        # HIGHEST / LOWEST
         # -----------------------------------------------------
 
-        has_grouping = any(
+        if any(
             phrase in question_lower
             for phrase in [
-                " by ",
-                " per ",
-                " for each ",
-                " each ",
-                "grouped by",
-                "group by",
+                "highest",
+                "largest",
+                "most",
+                "maximum",
+                "max"
             ]
-        )
-
-        if (
-            group_column
-            and value_column
-            and (
-                has_grouping
-                or sort is not None
-            )
         ):
-            return {
-                "operation": "groupby_aggregate",
-                "group_column": group_column,
-                "value_column": value_column,
-                "aggregation": aggregation or "sum",
-                "sort": sort,
-                "limit": limit,
-            }
+
+            if group_column and value_column:
+
+                return {
+                    "operation": "groupby_aggregate",
+                    "group_column": group_column,
+                    "value_column": value_column,
+                    "aggregation": aggregation or "sum",
+                    "sort": "descending",
+                    "limit": 1
+                }
+
+        if any(
+            phrase in question_lower
+            for phrase in [
+                "lowest",
+                "smallest",
+                "least",
+                "minimum",
+                "min"
+            ]
+        ):
+
+            if group_column and value_column:
+
+                return {
+                    "operation": "groupby_aggregate",
+                    "group_column": group_column,
+                    "value_column": value_column,
+                    "aggregation": aggregation or "sum",
+                    "sort": "ascending",
+                    "limit": 1
+                }
+
+        # -----------------------------------------------------
+        # BY GROUP
+        # -----------------------------------------------------
+
+        if group_column and value_column:
+
+            if " by " in question_lower:
+
+                return {
+                    "operation": "groupby_aggregate",
+                    "group_column": group_column,
+                    "value_column": value_column,
+                    "aggregation": aggregation or "sum"
+                }
 
         # -----------------------------------------------------
         # VALUE COUNT
         # -----------------------------------------------------
 
-        if (
-            group_column
-            and any(
-                phrase in question_lower
-                for phrase in [
-                    "how many",
-                    "count",
-                    "number of",
-                ]
-            )
+        value_count_phrases = [
+            "how many different",
+            "how many unique",
+            "unique values",
+            "different values",
+            "value counts",
+            "frequency of"
+        ]
+
+        if any(
+            phrase in question_lower
+            for phrase in value_count_phrases
         ):
-            return {
-                "operation": "value_count",
-                "group_column": group_column,
-                "sort": sort,
-                "limit": limit,
-            }
+
+            column = self._find_column(
+                question_lower,
+                columns
+            )
+
+            if column:
+                return {
+                    "operation": "value_count",
+                    "column": column
+                }
 
         # -----------------------------------------------------
         # SIMPLE AGGREGATE
         # -----------------------------------------------------
 
+        value_column = (
+            value_column
+            or self._find_numeric_column(
+                question_lower,
+                columns
+            )
+        )
+
         if value_column and aggregation:
+
             return {
                 "operation": "aggregate",
                 "value_column": value_column,
-                "aggregation": aggregation,
+                "aggregation": aggregation
             }
 
         # -----------------------------------------------------
@@ -364,19 +553,19 @@ RULES
         return {
             "operation": "unsupported",
             "reason": (
-                "The local parser could not map this "
-                "question to a supported operation."
-            ),
+                "The question could not be mapped to a "
+                "supported data-analysis operation."
+            )
         }
 
-    # =========================================================
-    # SCHEMA PARSER
-    # =========================================================
+    # ---------------------------------------------------------
+    # EXTRACT COLUMNS FROM SCHEMA
+    # ---------------------------------------------------------
 
-    @staticmethod
     def _extract_columns(
+        self,
         schema_summary: str
-    ) -> list[dict[str, str]]:
+    ) -> List[Dict[str, str]]:
 
         columns = []
 
@@ -384,12 +573,11 @@ RULES
 
             line = line.strip()
 
-            # We only care about lines beginning with "-"
             if not line.startswith("-"):
                 continue
 
             # Example:
-            # - Product | type=categorical | dtype=str
+            # - Quantity | type=numeric | dtype=int64
 
             parts = [
                 part.strip()
@@ -399,37 +587,44 @@ RULES
             if not parts:
                 continue
 
-            column_name = parts[0]
+            name = parts[0]
 
-            column_type = None
+            semantic_type = "categorical"
 
             for part in parts[1:]:
 
                 if part.startswith("type="):
-                    column_type = part[
-                        len("type="):
-                    ].strip().lower()
+                    semantic_type = part.split(
+                        "=",
+                        1
+                    )[1].strip()
 
-            if column_name and column_type:
+                elif part.startswith("semantic_type="):
+                    semantic_type = part.split(
+                        "=",
+                        1
+                    )[1].strip()
 
-                columns.append({
-                    "name": column_name,
-                    "semantic_type": column_type,
-                })
+            columns.append({
+                "name": name,
+                "semantic_type": semantic_type
+            })
 
         return columns
 
-    # =========================================================
-    # COLUMN MATCHING
-    # =========================================================
+    # ---------------------------------------------------------
+    # FIND COLUMN
+    # ---------------------------------------------------------
 
-    @staticmethod
     def _find_column(
-        question_lower: str,
-        columns: list[dict[str, str]]
-    ) -> str | None:
+        self,
+        question: str,
+        columns: List[Dict[str, str]]
+    ) -> Optional[str]:
 
-        # Exact name match
+        question_lower = question.lower()
+
+        # Exact column-name matching first
         for column in columns:
 
             name = column["name"]
@@ -437,26 +632,55 @@ RULES
             if name.lower() in question_lower:
                 return name
 
-        # Word match
+        # Word-based matching
         for column in columns:
+
+            name = column["name"].lower()
 
             words = re.findall(
                 r"[a-zA-Z0-9]+",
-                column["name"].lower()
+                name
             )
 
             for word in words:
 
-                if len(word) > 2 and word in question_lower:
+                if len(word) <= 2:
+                    continue
+
+                if re.search(
+                    rf"\b{re.escape(word)}\w*\b",
+                    question_lower
+                ):
                     return column["name"]
+
+                # Handle:
+                # country -> countries
+                # category -> categories
+                # company -> companies
+
+                if word.endswith("y"):
+
+                    plural_form = (
+                        word[:-1] + "ies"
+                    )
+
+                    if re.search(
+                        rf"\b{re.escape(plural_form)}\b",
+                        question_lower
+                    ):
+                        return column["name"]
 
         return None
 
-    @staticmethod
+    # ---------------------------------------------------------
+    # FIND NUMERIC COLUMN
+    # ---------------------------------------------------------
+
     def _find_numeric_column(
-        question_lower: str,
-        columns: list[dict[str, str]]
-    ) -> str | None:
+        self,
+        question: str,
+        columns: List[Dict[str, str]]
+    ) -> Optional[str]:
 
         numeric_columns = [
             column
@@ -467,258 +691,368 @@ RULES
         # Exact match
         for column in numeric_columns:
 
-            if column["name"].lower() in question_lower:
+            if column["name"].lower() in question:
                 return column["name"]
 
-        # Word match
+        # Word/plural match
         for column in numeric_columns:
+
+            name = column["name"].lower()
 
             words = re.findall(
                 r"[a-zA-Z0-9]+",
-                column["name"].lower()
+                name
             )
 
             for word in words:
 
-                if len(word) > 2 and word in question_lower:
+                if len(word) <= 2:
+                    continue
+
+                if re.search(
+                    rf"\b{re.escape(word)}\w*\b",
+                    question
+                ):
                     return column["name"]
 
-        # Only one numeric column
+                if word.endswith("y"):
+
+                    plural_form = (
+                        word[:-1] + "ies"
+                    )
+
+                    if re.search(
+                        rf"\b{re.escape(plural_form)}\b",
+                        question
+                    ):
+                        return column["name"]
+
+        # If exactly one numeric column exists
         if len(numeric_columns) == 1:
             return numeric_columns[0]["name"]
 
         return None
 
-    # =========================================================
-    # AGGREGATION DETECTION
-    # =========================================================
+    # ---------------------------------------------------------
+    # FIND GROUP + VALUE COLUMNS
+    # ---------------------------------------------------------
 
-    @staticmethod
+    def _find_group_and_value_columns(
+        self,
+        question: str,
+        columns: List[Dict[str, str]]
+    ):
+
+        group_column = None
+        value_column = None
+
+        categorical_columns = [
+            column
+            for column in columns
+            if column["semantic_type"]
+            in ["categorical", "text"]
+        ]
+
+        numeric_columns = [
+            column
+            for column in columns
+            if column["semantic_type"] == "numeric"
+        ]
+
+        # -----------------------------------------------------
+        # CASE 1:
+        # "top 5 countries by total quantity"
+        # -----------------------------------------------------
+
+        if " by " in question:
+
+            before_by, after_by = question.split(
+                " by ",
+                1
+            )
+
+            group_text = before_by
+            value_text = after_by
+
+            # Find GROUP column
+            for column in categorical_columns:
+
+                name = column["name"]
+
+                words = re.findall(
+                    r"[a-zA-Z0-9]+",
+                    name.lower()
+                )
+
+                for word in words:
+
+                    if len(word) <= 2:
+                        continue
+
+                    # Direct / prefix match
+                    #
+                    # product -> products
+                    # region -> regions
+                    # country -> country
+                    if re.search(
+                        rf"\b{re.escape(word)}\w*\b",
+                        group_text
+                    ):
+                        group_column = name
+                        break
+
+                    # -----------------------------------------
+                    # IMPORTANT PLURAL FIX
+                    #
+                    # country -> countries
+                    # category -> categories
+                    # company -> companies
+                    # -----------------------------------------
+
+                    if word.endswith("y"):
+
+                        plural_form = (
+                            word[:-1] + "ies"
+                        )
+
+                        if re.search(
+                            rf"\b{re.escape(plural_form)}\b",
+                            group_text
+                        ):
+                            group_column = name
+                            break
+
+                if group_column:
+                    break
+
+            # Find VALUE column
+            for column in numeric_columns:
+
+                name = column["name"]
+
+                words = re.findall(
+                    r"[a-zA-Z0-9]+",
+                    name.lower()
+                )
+
+                for word in words:
+
+                    if len(word) <= 2:
+                        continue
+
+                    if re.search(
+                        rf"\b{re.escape(word)}\w*\b",
+                        value_text
+                    ):
+                        value_column = name
+                        break
+
+                    if word.endswith("y"):
+
+                        plural_form = (
+                            word[:-1] + "ies"
+                        )
+
+                        if re.search(
+                            rf"\b{re.escape(plural_form)}\b",
+                            value_text
+                        ):
+                            value_column = name
+                            break
+
+                if value_column:
+                    break
+
+            if group_column and value_column:
+                return group_column, value_column
+
+        # -----------------------------------------------------
+        # CASE 2:
+        # "which country has highest quantity?"
+        # -----------------------------------------------------
+
+        comparison_words = [
+            "highest",
+            "largest",
+            "most",
+            "lowest",
+            "smallest",
+            "least",
+            "maximum",
+            "minimum",
+            "top",
+            "bottom"
+        ]
+
+        has_comparison = any(
+            word in question
+            for word in comparison_words
+        )
+
+        if has_comparison:
+
+            # Find categorical/group column
+            for column in categorical_columns:
+
+                if self._column_mentioned(
+                    column["name"],
+                    question
+                ):
+                    group_column = column["name"]
+                    break
+
+            # Find numeric/value column
+            for column in numeric_columns:
+
+                if self._column_mentioned(
+                    column["name"],
+                    question
+                ):
+                    value_column = column["name"]
+                    break
+
+            if group_column and value_column:
+                return group_column, value_column
+
+        # -----------------------------------------------------
+        # GENERAL FALLBACK
+        # -----------------------------------------------------
+
+        possible_group = self._find_column(
+            question,
+            categorical_columns
+        )
+
+        possible_value = self._find_numeric_column(
+            question,
+            columns
+        )
+
+        return (
+            possible_group,
+            possible_value
+        )
+
+    # ---------------------------------------------------------
+    # COLUMN MENTION HELPER
+    # ---------------------------------------------------------
+
+    def _column_mentioned(
+        self,
+        column_name: str,
+        question: str
+    ) -> bool:
+
+        column_lower = column_name.lower()
+
+        # Full column name
+        if column_lower in question:
+            return True
+
+        words = re.findall(
+            r"[a-zA-Z0-9]+",
+            column_lower
+        )
+
+        for word in words:
+
+            if len(word) <= 2:
+                continue
+
+            # Normal plural / prefix
+            if re.search(
+                rf"\b{re.escape(word)}\w*\b",
+                question
+            ):
+                return True
+
+            # country -> countries
+            # category -> categories
+            if word.endswith("y"):
+
+                plural_form = (
+                    word[:-1] + "ies"
+                )
+
+                if re.search(
+                    rf"\b{re.escape(plural_form)}\b",
+                    question
+                ):
+                    return True
+
+        return False
+
+    # ---------------------------------------------------------
+    # DETECT AGGREGATION
+    # ---------------------------------------------------------
+
     def _detect_aggregation(
-        question_lower: str
-    ) -> str | None:
+        self,
+        question: str
+    ) -> Optional[str]:
 
-        # -----------------------------------------------------
-        # IMPORTANT:
-        # "highest total sales" means:
-        #   aggregate = SUM
-        #   sorting = DESCENDING
-        #
-        # "highest sales" without "total" can mean MAX.
-        # -----------------------------------------------------
-
+        # SUM
         if any(
-            phrase in question_lower
+            phrase in question
             for phrase in [
                 "total",
                 "sum",
-                "overall total",
+                "overall",
+                "combined"
             ]
         ):
             return "sum"
 
-        # -----------------------------------------------------
-        # AVERAGE / MEAN
-        # -----------------------------------------------------
-
+        # MEAN
         if any(
-            word in question_lower
-            for word in [
+            phrase in question
+            for phrase in [
                 "average",
                 "avg",
-                "mean",
+                "mean"
             ]
         ):
             return "mean"
 
-        # -----------------------------------------------------
         # MEDIAN
-        # -----------------------------------------------------
-
-        if "median" in question_lower:
+        if "median" in question:
             return "median"
 
-        # -----------------------------------------------------
-        # MINIMUM
-        # -----------------------------------------------------
-
+        # MAX
         if any(
-            word in question_lower
-            for word in [
-                "minimum",
-                "min",
-            ]
-        ):
-            return "min"
-
-        # -----------------------------------------------------
-        # MAXIMUM
-        # -----------------------------------------------------
-
-        if any(
-            word in question_lower
-            for word in [
+            phrase in question
+            for phrase in [
                 "maximum",
-                "max",
+                "max"
             ]
         ):
             return "max"
 
-        # -----------------------------------------------------
-        # TOP / BOTTOM
-        #
-        # Top/bottom questions usually ask which groups
-        # have the greatest/smallest total value.
-        # -----------------------------------------------------
-
+        # MIN
         if any(
-            word in question_lower
-            for word in [
+            phrase in question
+            for phrase in [
+                "minimum",
+                "min"
+            ]
+        ):
+            return "min"
+
+        # For top/bottom questions,
+        # the value is normally SUM.
+        if any(
+            phrase in question
+            for phrase in [
                 "top",
                 "bottom",
+                "highest",
+                "lowest",
+                "largest",
+                "smallest",
+                "most",
+                "least"
             ]
         ):
             return "sum"
 
-        # -----------------------------------------------------
-        # "highest" / "lowest" by themselves
-        # -----------------------------------------------------
-
-        if any(
-            word in question_lower
-            for word in [
-                "highest",
-                "largest",
-            ]
-        ):
-            return "max"
-
-        if any(
-            word in question_lower
-            for word in [
-                "lowest",
-                "smallest",
-            ]
-        ):
-            return "min"
-
         return None
-
-    # =========================================================
-    # VALIDATION
-    # =========================================================
-
-    @staticmethod
-    def _validate_operation(
-        operation: dict[str, Any],
-        schema_summary: str
-    ) -> None:
-
-        if not isinstance(operation, dict):
-            raise ValueError(
-                "Parser result must be a JSON object."
-            )
-
-        operation_type = operation.get(
-            "operation"
-        )
-
-        allowed = {
-            "aggregate",
-            "count",
-            "groupby_aggregate",
-            "value_count",
-            "filter",
-            "unsupported",
-        }
-
-        if operation_type not in allowed:
-            raise ValueError(
-                f"Unsupported operation returned by LLM: "
-                f"{operation_type}"
-            )
-
-        if operation_type == "unsupported":
-
-            if not operation.get("reason"):
-                raise ValueError(
-                    "Unsupported operation must include a reason."
-                )
-
-        if operation_type == "aggregate":
-            required = [
-                "value_column",
-                "aggregation",
-            ]
-
-        elif operation_type == "groupby_aggregate":
-            required = [
-                "group_column",
-                "value_column",
-                "aggregation",
-            ]
-
-        elif operation_type == "value_count":
-            required = [
-                "group_column"
-            ]
-
-        elif operation_type == "filter":
-            required = [
-                "column",
-                "operator",
-                "value",
-            ]
-
-        else:
-            required = []
-
-        missing = [
-            field
-            for field in required
-            if field not in operation
-        ]
-
-        if missing:
-            raise ValueError(
-                f"Parser response is missing fields: "
-                f"{missing}"
-            )
-
-        if operation_type in {
-            "aggregate",
-            "groupby_aggregate",
-        }:
-
-            aggregation = operation.get(
-                "aggregation"
-            )
-
-            if aggregation not in {
-                "sum",
-                "mean",
-                "min",
-                "max",
-                "median",
-            }:
-                raise ValueError(
-                    f"Invalid aggregation: {aggregation}"
-                )
-
-        if operation_type == "filter":
-
-            valid_operators = {
-                "equals",
-                "not_equals",
-                "greater_than",
-                "less_than",
-                "greater_or_equal",
-                "less_or_equal",
-                "contains",
-            }
-
-            if operation["operator"] not in valid_operators:
-                raise ValueError(
-                    f"Invalid filter operator: "
-                    f"{operation['operator']}"
-                )

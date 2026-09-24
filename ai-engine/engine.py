@@ -227,26 +227,68 @@ class DataIntelligenceEngine:
                 aggregation,
             )
 
-            first = records[0]
-
-            group_value = first.get(group_column)
-            result_value = first.get(value_column)
+            # -------------------------------------------------
+            # Single result
+            # Example:
+            # Which country has the highest total quantity?
+            # -------------------------------------------------
 
             if operation.get("limit") == 1:
+
+                first = records[0]
+
+                group_value = first.get(group_column)
+                result_value = first.get(value_column)
+
+                if operation.get("sort") == "descending":
+
+                    return (
+                        f"{group_value} has the highest "
+                        f"{label} {value_column} with "
+                        f"{DataIntelligenceEngine._format_number(result_value)}."
+                    )
+
                 return (
-                    f"{group_value} has the highest "
-                    f"{label} {value_column} with "
-                    f"{DataIntelligenceEngine._format_number(result_value)}."
-                    if operation.get("sort") == "descending"
-                    else
                     f"{group_value} has the lowest "
                     f"{label} {value_column} with "
                     f"{DataIntelligenceEngine._format_number(result_value)}."
                 )
 
+            # -------------------------------------------------
+            # Multiple results
+            # Example:
+            # What are the top 5 countries by total quantity?
+            # -------------------------------------------------
+
+            lines = []
+
+            for index, record in enumerate(
+                records,
+                start=1,
+            ):
+
+                group_value = record.get(
+                    group_column
+                )
+
+                result_value = record.get(
+                    value_column
+                )
+
+                lines.append(
+                    f"{index}. {group_value} — "
+                    f"{DataIntelligenceEngine._format_number(result_value)}"
+                )
+
+            if operation.get("sort") == "descending":
+                direction = "Top"
+            else:
+                direction = "Bottom"
+
             return (
-                f"Calculated the {label} {value_column} "
-                f"for {len(records)} groups."
+                f"{direction} {len(records)} "
+                f"{group_column} by {label} {value_column}:\n"
+                + "\n".join(lines)
             )
 
         # -----------------------------------------------------
@@ -290,6 +332,215 @@ class DataIntelligenceEngine:
                 f"matching record(s)."
             )
 
+        # -----------------------------------------------------
+        # Duplicate detection answer
+        # -----------------------------------------------------
+
+        if operation_type == "duplicate_detection":
+
+            duplicate_count = result.get(
+                "duplicate_row_count",
+                0,
+            )
+
+            group_count = result.get(
+                "duplicate_group_count",
+                0,
+            )
+
+            if not result.get(
+                "has_duplicates",
+                False,
+            ):
+
+                return (
+                    "No completely duplicated records "
+                    "were detected."
+                )
+
+            return (
+                f"Found "
+                f"{DataIntelligenceEngine._format_number(duplicate_count)} "
+                f"duplicate record(s) across "
+                f"{DataIntelligenceEngine._format_number(group_count)} "
+                f"duplicate group(s)."
+            )
+
+        # -----------------------------------------------------
+        # Anomaly detection answer
+        # -----------------------------------------------------
+
+        if operation_type == "anomaly_detection":
+
+            anomaly_count = result.get(
+                "anomaly_count",
+                0,
+            )
+
+            columns = result.get(
+                "columns_checked",
+                [],
+            )
+
+            if not result.get(
+                "has_anomalies",
+                False,
+            ):
+
+                return (
+                    "No potential anomalies were detected in "
+                    f"{', '.join(columns)}."
+                    if columns
+                    else
+                    "No potential anomalies were detected."
+                )
+
+            column_text = ", ".join(columns)
+
+            return (
+                f"Found "
+                f"{DataIntelligenceEngine._format_number(anomaly_count)} "
+                f"potential anomalous value(s) in "
+                f"{column_text} using IQR-based detection."
+            )
+
+        # -----------------------------------------------------
+        # Pattern detection answer
+        # -----------------------------------------------------
+
+        if operation_type == "pattern_detection":
+
+            # The actual pattern records are stored in "data".
+            # "patterns_found" is only the integer count.
+
+            patterns = result.get(
+                "data",
+                [],
+            )
+
+            if not patterns:
+
+                return (
+                    "No strong measurable patterns were detected "
+                    "in the selected columns."
+                )
+
+            descriptions = []
+
+            for pattern in patterns[:3]:
+
+                pattern_type = pattern.get(
+                    "type",
+                    "pattern",
+                )
+
+                if pattern_type == "numeric_summary":
+
+                    descriptions.append(
+                        f"'{pattern.get('column')}' has a mean of "
+                        f"{DataIntelligenceEngine._format_number(pattern.get('mean'))} "
+                        f"and a median of "
+                        f"{DataIntelligenceEngine._format_number(pattern.get('median'))}"
+                    )
+
+                elif pattern_type == "distribution_pattern":
+
+                    descriptions.append(
+                        f"'{pattern.get('column')}': "
+                        f"{pattern.get('finding')}"
+                    )
+
+                elif pattern_type == "category_distribution":
+
+                    descriptions.append(
+                        f"'{pattern.get('column')}' has "
+                        f"{pattern.get('unique_values')} unique values, "
+                        f"with '{pattern.get('most_common_value')}' "
+                        f"being the most common"
+                    )
+
+                elif pattern_type == "concentration_pattern":
+
+                    descriptions.append(
+                        f"'{pattern.get('column')}': "
+                        f"{pattern.get('finding')}"
+                    )
+
+                elif pattern_type == "relationship":
+
+                    columns = pattern.get(
+                        "columns",
+                        [],
+                    )
+
+                    if len(columns) >= 2:
+
+                        descriptions.append(
+                            f"'{columns[0]}' and '{columns[1]}' "
+                            f"have a correlation of "
+                            f"{pattern.get('correlation')}"
+                        )
+
+                elif pattern.get("finding"):
+
+                    descriptions.append(
+                        str(pattern.get("finding"))
+                    )
+
+            if descriptions:
+
+                return (
+                    f"Detected {len(patterns)} measurable pattern(s): "
+                    + "; ".join(descriptions)
+                    + "."
+                )
+
+            return (
+                f"Detected {len(patterns)} measurable pattern(s) "
+                "in the dataset."
+            )
+
+        # -----------------------------------------------------
+        # Recommendation answer
+        # -----------------------------------------------------
+
+        if operation_type == "recommendation":
+
+            recommendations = result.get(
+                "recommendations",
+                [],
+            )
+
+            findings = result.get(
+                "findings",
+                [],
+            )
+
+            if not recommendations:
+
+                return (
+                    "No specific recommendations could be generated "
+                    "from the available dataset."
+                )
+
+            parts = []
+
+            for recommendation in recommendations[:3]:
+
+                parts.append(
+                    str(recommendation)
+                )
+
+            return (
+                f"Based on {len(findings)} detected finding(s), "
+                "the analysis suggests: "
+                + " ".join(parts)
+            )
+
+        # -----------------------------------------------------
+        # Fallback
+        # -----------------------------------------------------
+
         return "Analysis completed successfully."
 
     @staticmethod
@@ -299,6 +550,7 @@ class DataIntelligenceEngine:
             return "N/A"
 
         if isinstance(value, float):
+
             if value.is_integer():
                 return f"{int(value):,}"
 
