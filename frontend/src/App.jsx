@@ -17,110 +17,87 @@ function App() {
   const [data, setData] = useState([]);
   const [columns, setColumns] = useState([]);
   const [question, setQuestion] = useState("");
-
   const [answer, setAnswer] = useState("");
   const [calculation, setCalculation] = useState("");
   const [insights, setInsights] = useState([]);
   const [chartData, setChartData] = useState([]);
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // --------------------------------
-  // FILE UPLOAD
-  // --------------------------------
-
   const handleFileChange = (event) => {
     const selectedFile = event.target.files[0];
-  
     if (!selectedFile) return;
-  
+
     setFile(selectedFile);
     setError("");
     setAnswer("");
     setCalculation("");
     setInsights([]);
     setChartData([]);
-  
+
     const fileName = selectedFile.name.toLowerCase();
-  
-    // CSV
+
     if (fileName.endsWith(".csv")) {
       Papa.parse(selectedFile, {
         header: true,
         skipEmptyLines: true,
-  
         complete: (result) => {
           const rows = result.data;
-  
           setData(rows);
-  
+
           if (rows.length > 0) {
             const detectedColumns = Object.keys(rows[0]);
-  
-            setColumns(detectedColumns);
-            detectLocalInsights(rows, detectedColumns);
-          }
-        },
-  
-        error: (error) => {
-          console.error(error);
-          setError("Unable to read the CSV file.");
-        },
-      });
-  
-      return;
-    }
-  
-    // Excel
-    if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
-      const reader = new FileReader();
-  
-      reader.onload = (e) => {
-        try {
-          const workbook = XLSX.read(e.target.result, {
-            type: "array",
-          });
-  
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-  
-          const rows = XLSX.utils.sheet_to_json(worksheet, {
-            defval: "",
-          });
-  
-          setData(rows);
-  
-          if (rows.length > 0) {
-            const detectedColumns = Object.keys(rows[0]);
-  
             setColumns(detectedColumns);
             detectLocalInsights(rows, detectedColumns);
           } else {
+            setColumns([]);
+            setError("The CSV file does not contain any data.");
+          }
+        },
+        error: (parseError) => {
+          console.error(parseError);
+          setError("Unable to read the CSV file.");
+        },
+      });
+      return;
+    }
+
+    if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
+      const reader = new FileReader();
+
+      reader.onload = (e) => {
+        try {
+          const workbook = XLSX.read(e.target.result, { type: "array" });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+
+          const rows = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+          setData(rows);
+
+          if (rows.length > 0) {
+            const detectedColumns = Object.keys(rows[0]);
+            setColumns(detectedColumns);
+            detectLocalInsights(rows, detectedColumns);
+          } else {
+            setColumns([]);
             setError("The Excel file does not contain any data.");
           }
-        } catch (error) {
-          console.error(error);
+        } catch (readError) {
+          console.error(readError);
           setError("Unable to read the Excel file.");
         }
       };
-  
+
       reader.readAsArrayBuffer(selectedFile);
-  
       return;
     }
-  
+
     setError("Please upload a CSV, XLS, or XLSX file.");
   };
-
-  // --------------------------------
-  // BASIC DATA DETECTION
-  // --------------------------------
 
   const detectLocalInsights = (rows, cols) => {
     const detected = [];
 
-    // Missing values
     cols.forEach((column) => {
       const missing = rows.filter(
         (row) =>
@@ -139,10 +116,8 @@ function App() {
       }
     });
 
-    // Duplicate rows
     const rowStrings = rows.map((row) => JSON.stringify(row));
     const uniqueRows = new Set(rowStrings);
-
     const duplicateCount = rows.length - uniqueRows.size;
 
     if (duplicateCount > 0) {
@@ -157,16 +132,13 @@ function App() {
     if (detected.length === 0) {
       detected.push({
         type: "Initial Scan",
-        message: "No missing values or duplicate rows detected in the initial scan.",
+        message:
+          "No missing values or duplicate rows detected in the initial scan.",
       });
     }
 
     setInsights(detected);
   };
-
-  // --------------------------------
-  // ASK AI
-  // --------------------------------
 
   const handleAskQuestion = async () => {
     if (!question.trim()) {
@@ -175,7 +147,7 @@ function App() {
     }
 
     if (data.length === 0) {
-      setError("Please upload a CSV dataset first.");
+      setError("Please upload a dataset first.");
       return;
     }
 
@@ -185,19 +157,12 @@ function App() {
     /*
       BACKEND INTEGRATION POINT
 
-      Your backend teammate can provide the API endpoint here.
-
-      Example:
+      Replace this placeholder when Friend 4 provides the real API:
 
       const response = await fetch("http://localhost:8000/api/analyze", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          question,
-          data,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, data }),
       });
 
       const result = await response.json();
@@ -209,12 +174,9 @@ function App() {
     */
 
     try {
-      // Temporary connection placeholder.
-      // No fake AI answer is generated.
       setAnswer(
         "Backend analysis is not connected yet. The frontend is ready to send your question and dataset to the AI API."
       );
-
       setCalculation(
         "The calculation explanation will be displayed here when the backend returns the analysis steps."
       );
@@ -226,438 +188,444 @@ function App() {
     }
   };
 
-  // --------------------------------
-  // SUGGESTED QUESTION
-  // --------------------------------
-
   const askSuggestedQuestion = (text) => {
     setQuestion(text);
+    document.getElementById("ask")?.scrollIntoView({ behavior: "smooth" });
   };
+
+  const scrollTo = (id) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const issueCount =
+    insights.length > 0 &&
+    !(insights.length === 1 && insights[0].type === "Initial Scan")
+      ? insights.length
+      : 0;
 
   return (
     <div className="app">
-
-      {/* HEADER */}
-
-      <header className="header">
-        <div>
-          <h1>🔍 Data Detective AI</h1>
-          <p>
-            Talk to your data. Discover hidden insights.
-          </p>
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark">🕵️</div>
+          <div>
+            <strong>Data Detective</strong>
+            <span>AI Data Lab</span>
+          </div>
         </div>
-      </header>
 
-      <main className="dashboard">
+        <div className="nav-label">WORKSPACE</div>
 
-        {/* UPLOAD */}
+        <nav className="nav">
+          <button className="nav-item active" onClick={() => scrollTo("dashboard")}>
+            <span>⌂</span> Dashboard
+          </button>
+          <button className="nav-item" onClick={() => scrollTo("dataset")}>
+            <span>▣</span> My Dataset
+          </button>
+          <button className="nav-item" onClick={() => scrollTo("ask")}>
+            <span>✦</span> Ask Your Data
+          </button>
+          <button className="nav-item" onClick={() => scrollTo("analytics")}>
+            <span>▥</span> Analytics
+          </button>
+          <button className="nav-item" onClick={() => scrollTo("detective")}>
+            <span>⌕</span> Data Detective
+          </button>
+          <button className="nav-item" onClick={() => scrollTo("insights")}>
+            <span>◇</span> Insights
+          </button>
+        </nav>
 
-        <section className="card upload-card">
-
-          <h2>📂 Upload Your Dataset</h2>
-
-          <p>
-            Upload a CSV or Excel dataset for AI-powered analysis.
-          </p>
-
-          <label className="upload-box">
-
-            <input
-              type="file"
-              accept=".csv,.xlsx,.xls"
-              onChange={handleFileChange}
-            />
-
-            <span className="upload-icon">📁</span>
-
-            <strong>
-              {file
-                ? file.name
-                : "Choose a CSV or Excel file"}
-            </strong>
-
-            <small>
-              {file
-                ? `${(file.size / 1024).toFixed(1)} KB`
-                : "Click here to browse your files"}
-            </small>
-
-          </label>
-
-          {error && (
-            <p className="error-message">
-              {error}
-            </p>
-          )}
-
-        </section>
-
-        {/* DATASET OVERVIEW */}
-
-        <section className="card">
-
-          <h2>📊 Dataset Overview</h2>
-
-          <div className="stats">
-
-            <div className="stat">
-              <span>Rows</span>
-              <strong>
-                {data.length || "--"}
-              </strong>
+        <div className="sidebar-bottom">
+          <div className="mini-tip">
+            <span>✨</span>
+            <div>
+              <strong>Detective tip</strong>
+              <p>Ask simple questions. Let your data do the talking.</p>
             </div>
-
-            <div className="stat">
-              <span>Columns</span>
-              <strong>
-                {columns.length || "--"}
-              </strong>
-            </div>
-
-            <div className="stat">
-              <span>File</span>
-              <strong>
-                {file ? file.name : "--"}
-              </strong>
-            </div>
-
           </div>
+          <div className="sidebar-footer">⚙️ Workspace</div>
+        </div>
+      </aside>
 
-          <div className="schema">
+      <div className="main-shell">
+        <header className="topbar">
+          <div className="mobile-brand">
+            <span>🕵️</span> Data Detective AI
+          </div>
+          <div className="topbar-status">
+            <span className="status-dot"></span>
+            Analysis workspace
+          </div>
+          <button className="topbar-button" onClick={() => scrollTo("dataset")}>
+            + New dataset
+          </button>
+        </header>
 
-            <h3>Detected Schema</h3>
-
-            {columns.length > 0 ? (
-
-              <div className="column-list">
-
-                {columns.map((column, index) => (
-
-                  <span
-                    className="column-tag"
-                    key={index}
-                  >
-                    {column}
-                  </span>
-
-                ))}
-
-              </div>
-
-            ) : (
-
+        <main className="content">
+          <section className="hero" id="dashboard">
+            <div className="hero-copy">
+              <div className="eyebrow">✦ YOUR AI DATA WORKSPACE</div>
+              <h1>
+                Turn messy data into
+                <span> clear discoveries.</span>
+              </h1>
               <p>
-                Upload a CSV dataset to detect its schema.
+                Upload a dataset, ask a question in plain English, and uncover
+                the story hiding inside your numbers.
               </p>
+              <div className="hero-actions">
+                <button className="primary-button" onClick={() => scrollTo("dataset")}>
+                  <span>📁</span> Explore my data
+                </button>
+                <button className="ghost-button" onClick={() => scrollTo("ask")}>
+                  <span>✦</span> Ask a question
+                </button>
+              </div>
+            </div>
 
-            )}
-
-          </div>
-
+            <div className="hero-orbit">
+              <div className="orbit orbit-one"></div>
+              <div className="orbit orbit-two"></div>
+              <div className="detective-bubble">
+                <span>🕵️</span>
+                <strong>Let's investigate!</strong>
+                <small>Your dataset is the clue.</small>
+              </div>
+              <div className="float-card float-card-one">📈 Trends</div>
+              <div className="float-card float-card-two">💡 Insights</div>
+              <div className="float-card float-card-three">🔎 Anomalies</div>
+            </div>
           </section>
 
-{/* DATASET PREVIEW */}
+          <section className="stats-row">
+            <div className="metric-card blue">
+              <span className="metric-icon">📄</span>
+              <div>
+                <small>DATASET</small>
+                <strong>{file ? file.name : "Not uploaded"}</strong>
+              </div>
+            </div>
+            <div className="metric-card purple">
+              <span className="metric-icon">↕</span>
+              <div>
+                <small>ROWS</small>
+                <strong>{data.length || "—"}</strong>
+              </div>
+            </div>
+            <div className="metric-card pink">
+              <span className="metric-icon">#</span>
+              <div>
+                <small>COLUMNS</small>
+                <strong>{columns.length || "—"}</strong>
+              </div>
+            </div>
+            <div className="metric-card yellow">
+              <span className="metric-icon">🔎</span>
+              <div>
+                <small>ISSUES FOUND</small>
+                <strong>{issueCount || "0"}</strong>
+              </div>
+            </div>
+          </section>
 
-<section className="card preview-card">
+          {error && <div className="global-error">⚠️ {error}</div>}
 
-  <h2>👀 Dataset Preview</h2>
-
-  <p>
-    A quick look at the first 10 rows of your uploaded dataset.
-  </p>
-
-  {data.length > 0 ? (
-
-    <div className="table-wrapper">
-
-      <table className="data-table">
-
-        <thead>
-          <tr>
-            {columns.map((column, index) => (
-              <th key={index}>{column}</th>
-            ))}
-          </tr>
-        </thead>
-
-        <tbody>
-          {data.slice(0, 10).map((row, rowIndex) => (
-            <tr key={rowIndex}>
-              {columns.map((column, columnIndex) => (
-                <td key={columnIndex}>
-                  {row[column] === undefined ||
-                  row[column] === null ||
-                  row[column] === ""
-                    ? "—"
-                    : String(row[column])}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-
-      </table>
-
-    </div>
-
-  ) : (
-
-    <div className="empty-state">
-      <span>👀</span>
-      <p>Upload a dataset to preview your data.</p>
-    </div>
-
-  )}
-
-  {data.length > 10 && (
-    <small className="preview-count">
-      Showing first 10 of {data.length} rows
-    </small>
-  )}
-
-</section>
-
-{/* ASK YOUR DATA */}
-
-<section className="card question-card">
-
-          <h2>💬 Ask Your Data</h2>
-
-          <p>
-            Ask questions about your dataset using normal English.
-          </p>
-
-          <div className="question-input">
-
-            <input
-              type="text"
-              value={question}
-              onChange={(e) =>
-                setQuestion(e.target.value)
-              }
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  handleAskQuestion();
-                }
-              }}
-              placeholder="Example: What was the total sales in 2025?"
-            />
-
-            <button
-              onClick={handleAskQuestion}
-              disabled={loading}
-            >
-              {loading ? "Analyzing..." : "Ask AI"}
-            </button>
-
-          </div>
-
-        </section>
-
-        {/* AI ANSWER */}
-
-        <section className="card">
-
-          <h2>🤖 AI Answer</h2>
-
-          {answer ? (
-
-            <div className="answer-box">
-              {answer}
+          <section className="section-grid" id="dataset">
+            <div className="section-heading">
+              <div>
+                <span className="section-kicker">01 · DATA</span>
+                <h2>Bring your dataset in</h2>
+                <p>Start your investigation with a CSV or Excel file.</p>
+              </div>
             </div>
 
-          ) : (
-
-            <div className="empty-state">
-
-              <span>💡</span>
-
-              <p>
-                Your AI-generated answer will appear here.
-              </p>
-
-            </div>
-
-          )}
-
-        </section>
-
-        {/* CHART */}
-
-        <section className="card">
-
-          <h2>📈 Data Visualization</h2>
-
-          {chartData.length > 0 ? (
-
-            <div className="chart-container">
-
-              <ResponsiveContainer
-                width="100%"
-                height={350}
-              >
-
-                <BarChart data={chartData}>
-
-                  <CartesianGrid strokeDasharray="3 3" />
-
-                  <XAxis dataKey="name" />
-
-                  <YAxis />
-
-                  <Tooltip />
-
-                  <Bar dataKey="value" />
-
-                </BarChart>
-
-              </ResponsiveContainer>
-
-            </div>
-
-          ) : (
-
-            <div className="empty-state">
-
-              <span>📊</span>
-
-              <p>
-                Charts generated from AI analysis will appear here.
-              </p>
-
-            </div>
-
-          )}
-
-        </section>
-
-        {/* CALCULATION */}
-
-        <section className="card">
-
-          <h2>🧮 How Was This Calculated?</h2>
-
-          {calculation ? (
-
-            <div className="explanation">
-              {calculation}
-            </div>
-
-          ) : (
-
-            <div className="explanation">
-
-              The calculation steps returned by the AI
-              will appear here.
-
-            </div>
-
-          )}
-
-        </section>
-
-        {/* DATA DETECTIVE */}
-
-        <section className="card detective-card">
-
-          <h2>🔍 Data Detective</h2>
-
-          <p>
-            Automatically detected patterns and unusual
-            characteristics in your dataset.
-          </p>
-
-          {insights.length > 0 ? (
-
-            <div className="insight-list">
-
-              {insights.map((insight, index) => (
-
-                <div
-                  className="insight"
-                  key={index}
-                >
-
-                  <span>🔎</span>
-
+            <div className="upload-layout">
+              <section className="panel upload-panel">
+                <div className="panel-top">
                   <div>
-
-                    <strong>
-                      {insight.type}
-                    </strong>
-
-                    <p>
-                      {insight.message}
-                    </p>
-
+                    <span className="icon-square blue-icon">📂</span>
+                    <h3>Upload dataset</h3>
+                    <p>CSV, XLS or XLSX · Your data stays in this browser for now.</p>
                   </div>
-
+                  <span className="step-pill">STEP 1</span>
                 </div>
 
-              ))}
+                <label className="upload-box">
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={handleFileChange}
+                  />
+                  <div className="upload-cloud">☁️</div>
+                  <strong>{file ? file.name : "Drop your dataset here"}</strong>
+                  <span>{file ? `${(file.size / 1024).toFixed(1)} KB` : "or click to browse files"}</span>
+                  <div className="file-types">
+                    <b>CSV</b><b>XLS</b><b>XLSX</b>
+                  </div>
+                </label>
+              </section>
 
+              <section className="panel schema-panel">
+                <div className="panel-top">
+                  <div>
+                    <span className="icon-square purple-icon">🧩</span>
+                    <h3>Detected schema</h3>
+                    <p>Columns found in your uploaded dataset.</p>
+                  </div>
+                  <span className="step-pill purple-pill">AUTO</span>
+                </div>
+
+                {columns.length > 0 ? (
+                  <div className="column-list">
+                    {columns.map((column, index) => (
+                      <span className="column-tag" key={index}>
+                        <i>•</i> {column}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="soft-empty">
+                    <span>🧩</span>
+                    <p>Upload a file and I'll map its columns here.</p>
+                  </div>
+                )}
+              </section>
             </div>
 
-          ) : (
+            <section className="panel preview-panel">
+              <div className="panel-top preview-heading">
+                <div>
+                  <span className="icon-square cyan-icon">👀</span>
+                  <h3>Dataset preview</h3>
+                  <p>A quick peek at the first 10 records.</p>
+                </div>
+                {data.length > 0 && <span className="row-pill">{data.length} total rows</span>}
+              </div>
 
-            <div className="empty-state">
+              {data.length > 0 ? (
+                <div className="table-wrapper">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        {columns.map((column, index) => (
+                          <th key={index}>{column}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.slice(0, 10).map((row, rowIndex) => (
+                        <tr key={rowIndex}>
+                          {columns.map((column, columnIndex) => (
+                            <td key={columnIndex}>
+                              {row[column] === undefined ||
+                              row[column] === null ||
+                              row[column] === ""
+                                ? "—"
+                                : String(row[column])}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="soft-empty large-empty">
+                  <span>📊</span>
+                  <p>Upload a dataset to see your rows here.</p>
+                </div>
+              )}
 
-              <span>🔎</span>
+              {data.length > 10 && (
+                <small className="preview-count">Showing first 10 of {data.length} rows</small>
+              )}
+            </section>
+          </section>
 
-              <p>
-                Upload a dataset to start the detective scan.
-              </p>
+          <section className="ask-section" id="ask">
+            <div className="ask-glow"></div>
+            <div className="section-kicker">02 · INVESTIGATE</div>
+            <h2>Ask your data anything.</h2>
+            <p>Use normal English. No formulas, SQL, or complicated filters required.</p>
 
+            <div className="question-box">
+              <span className="question-sparkle">✦</span>
+              <input
+                type="text"
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleAskQuestion();
+                }}
+                placeholder="Try: What was the total sales in 2025?"
+              />
+              <button onClick={handleAskQuestion} disabled={loading}>
+                {loading ? "Thinking..." : "Ask AI →"}
+              </button>
             </div>
 
-          )}
+            <div className="suggestion-row">
+              <span>Try asking</span>
+              <button onClick={() => askSuggestedQuestion("What are the top 5 categories?")}>
+                Top 5 categories
+              </button>
+              <button onClick={() => askSuggestedQuestion("Which month had the highest sales?")}>
+                Highest sales month
+              </button>
+              <button onClick={() => askSuggestedQuestion("Are there any unusual values?")}>
+                Unusual values
+              </button>
+            </div>
+          </section>
 
-        </section>
+          <section className="results-grid" id="analytics">
+            <section className="panel answer-panel">
+              <div className="result-heading">
+                <span className="result-icon answer-icon">✦</span>
+                <div>
+                  <span className="section-kicker">03 · ANSWER</span>
+                  <h3>AI Answer</h3>
+                </div>
+              </div>
 
-        {/* SUGGESTED QUESTIONS */}
+              {answer ? (
+                <div className="answer-box">{answer}</div>
+              ) : (
+                <div className="soft-empty result-empty">
+                  <span>💬</span>
+                  <p>Your AI-generated answer will appear here.</p>
+                </div>
+              )}
+            </section>
 
-        <section className="card">
+            <section className="panel calculation-panel">
+              <div className="result-heading">
+                <span className="result-icon calc-icon">∑</span>
+                <div>
+                  <span className="section-kicker">04 · EXPLAIN</span>
+                  <h3>How was this calculated?</h3>
+                </div>
+              </div>
+              <div className="explanation">
+                {calculation ||
+                  "The calculation steps returned by the AI will appear here."}
+              </div>
+            </section>
 
-          <h2>💡 Suggested Questions</h2>
+            <section className="panel chart-panel">
+              <div className="result-heading">
+                <span className="result-icon chart-icon">▥</span>
+                <div>
+                  <span className="section-kicker">05 · VISUALIZE</span>
+                  <h3>Data visualization</h3>
+                </div>
+              </div>
 
-          <div className="suggestions">
+              {chartData.length > 0 ? (
+                <div className="chart-container">
+                  <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.12)" />
+                      <XAxis dataKey="name" stroke="#8d99b5" />
+                      <YAxis stroke="#8d99b5" />
+                      <Tooltip
+                        contentStyle={{
+                          background: "#171b32",
+                          border: "1px solid rgba(255,255,255,.12)",
+                          borderRadius: "12px",
+                          color: "#fff",
+                        }}
+                      />
+                      <Bar dataKey="value" fill="#8b5cf6" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="soft-empty chart-empty">
+                  <span>📈</span>
+                  <p>Charts generated from AI analysis will appear here.</p>
+                </div>
+              )}
+            </section>
+          </section>
 
-            <button
-              onClick={() =>
-                askSuggestedQuestion(
-                  "What are the top 5 categories?"
-                )
-              }
-            >
-              What are the top 5 categories?
-            </button>
+          <section className="detective-section" id="detective">
+            <div className="detective-header">
+              <div>
+                <div className="section-kicker">06 · INVESTIGATION</div>
+                <h2>🕵️ Data Detective</h2>
+                <p>Little clues that deserve a closer look.</p>
+              </div>
+              <div className="detective-badge">SCAN COMPLETE</div>
+            </div>
 
-            <button
-              onClick={() =>
-                askSuggestedQuestion(
-                  "Which month had the highest sales?"
-                )
-              }
-            >
-              Which month had the highest sales?
-            </button>
+            {insights.length > 0 ? (
+              <div className="insight-grid">
+                {insights.map((insight, index) => (
+                  <div className="insight-card" key={index}>
+                    <div className="insight-icon">
+                      {insight.type === "Missing Values"
+                        ? "⚠️"
+                        : insight.type === "Duplicate Rows"
+                        ? "🔁"
+                        : "✨"}
+                    </div>
+                    <div>
+                      <span>{insight.type}</span>
+                      <p>{insight.message}</p>
+                    </div>
+                    <b>→</b>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="detective-empty">
+                <span>🔎</span>
+                <div>
+                  <strong>No clues yet.</strong>
+                  <p>Upload a dataset to start the detective scan.</p>
+                </div>
+              </div>
+            )}
+          </section>
 
-            <button
-              onClick={() =>
-                askSuggestedQuestion(
-                  "Are there any unusual values?"
-                )
-              }
-            >
-              Are there any unusual values?
-            </button>
+          <section className="insights-section" id="insights">
+            <div>
+              <div className="section-kicker">07 · NEXT CLUES</div>
+              <h2>What should we investigate next?</h2>
+              <p>Keep exploring your dataset with quick questions.</p>
+            </div>
 
-          </div>
+            <div className="question-cards">
+              <button onClick={() => askSuggestedQuestion("What are the top 5 categories?")}>
+                <span>🏆</span>
+                <strong>Find the top performers</strong>
+                <small>Discover your top 5 categories</small>
+              </button>
+              <button onClick={() => askSuggestedQuestion("Which month had the highest sales?")}>
+                <span>📅</span>
+                <strong>Explore time trends</strong>
+                <small>Find the strongest month or period</small>
+              </button>
+              <button onClick={() => askSuggestedQuestion("Are there any unusual values?")}>
+                <span>🧠</span>
+                <strong>Look for surprises</strong>
+                <small>Ask about unusual values</small>
+              </button>
+            </div>
+          </section>
 
-        </section>
-
-      </main>
-
+          <footer className="footer">
+            <div>
+              <strong>🕵️ Data Detective AI</strong>
+              <span>Make your data tell its story.</span>
+            </div>
+            <span>Built for Hack the Horizon · Frontend workspace</span>
+          </footer>
+        </main>
+      </div>
     </div>
   );
 }
