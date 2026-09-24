@@ -354,11 +354,72 @@ function App() {
 
           </div>
 
-        </section>
+          </section>
 
-        {/* ASK YOUR DATA */}
+{/* DATASET PREVIEW */}
 
-        <section className="card question-card">
+<section className="card preview-card">
+
+  <h2>👀 Dataset Preview</h2>
+
+  <p>
+    A quick look at the first 10 rows of your uploaded dataset.
+  </p>
+
+  {data.length > 0 ? (
+
+    <div className="table-wrapper">
+
+      <table className="data-table">
+
+        <thead>
+          <tr>
+            {columns.map((column, index) => (
+              <th key={index}>{column}</th>
+            ))}
+          </tr>
+        </thead>
+
+        <tbody>
+          {data.slice(0, 10).map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {columns.map((column, columnIndex) => (
+                <td key={columnIndex}>
+                  {row[column] === undefined ||
+                  row[column] === null ||
+                  row[column] === ""
+                    ? "—"
+                    : String(row[column])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+
+      </table>
+
+    </div>
+
+  ) : (
+
+    <div className="empty-state">
+      <span>👀</span>
+      <p>Upload a dataset to preview your data.</p>
+    </div>
+
+  )}
+
+  {data.length > 10 && (
+    <small className="preview-count">
+      Showing first 10 of {data.length} rows
+    </small>
+  )}
+
+</section>
+
+{/* ASK YOUR DATA */}
+
+<section className="card question-card">
 
           <h2>💬 Ask Your Data</h2>
 
