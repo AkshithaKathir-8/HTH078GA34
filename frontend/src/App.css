@@ -1,0 +1,283 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  background: #f4f7fb;
+  color: #1f2937;
+}
+
+.app {
+  min-height: 100vh;
+}
+
+/* Header */
+
+.header {
+  background: #111827;
+  color: white;
+  padding: 30px 8%;
+}
+
+.header h1 {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+
+.header p {
+  color: #cbd5e1;
+  font-size: 16px;
+}
+
+/* Main Dashboard */
+
+.dashboard {
+  width: 84%;
+  max-width: 1200px;
+  margin: 30px auto;
+  display: grid;
+  gap: 24px;
+}
+
+/* Cards */
+
+.card {
+  background: white;
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.06);
+}
+
+.card h2 {
+  margin-bottom: 10px;
+  font-size: 21px;
+}
+
+.card > p {
+  color: #6b7280;
+  margin-bottom: 20px;
+}
+
+/* Upload */
+
+.upload-box {
+  border: 2px dashed #9ca3af;
+  border-radius: 12px;
+  padding: 35px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.upload-box:hover {
+  border-color: #2563eb;
+  background: #f8fafc;
+}
+
+.upload-box input {
+  display: none;
+}
+
+.upload-icon {
+  font-size: 40px;
+}
+
+.upload-box strong {
+  font-size: 16px;
+}
+
+.upload-box small {
+  color: #6b7280;
+}
+
+/* Dataset Statistics */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 15px;
+  margin-top: 20px;
+}
+
+.stat {
+  background: #f8fafc;
+  padding: 18px;
+  border-radius: 10px;
+}
+
+.stat span {
+  display: block;
+  color: #6b7280;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.stat strong {
+  font-size: 17px;
+  word-break: break-word;
+}
+
+/* Schema */
+
+.schema {
+  margin-top: 20px;
+  padding: 18px;
+  background: #f8fafc;
+  border-radius: 10px;
+}
+
+.schema h3 {
+  margin-bottom: 8px;
+}
+
+.schema p {
+  color: #6b7280;
+}
+
+.column-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.column-tag {
+  background: #eef2ff;
+  color: #3730a3;
+  padding: 7px 12px;
+  border-radius: 20px;
+  font-size: 14px;
+}
+
+/* Question */
+
+.question-input {
+  display: flex;
+  gap: 10px;
+}
+
+.question-input input {
+  flex: 1;
+  padding: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 15px;
+  outline: none;
+}
+
+.question-input input:focus {
+  border-color: #2563eb;
+}
+
+/* Buttons */
+
+button {
+  border: none;
+  border-radius: 8px;
+  padding: 12px 18px;
+  cursor: pointer;
+  background: #2563eb;
+  color: white;
+  font-size: 14px;
+  transition: 0.2s;
+}
+
+button:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+/* Empty Sections */
+
+.empty-state {
+  background: #f8fafc;
+  padding: 35px;
+  border-radius: 10px;
+  text-align: center;
+  color: #6b7280;
+}
+
+.empty-state span {
+  display: block;
+  font-size: 35px;
+  margin-bottom: 10px;
+}
+
+/* Calculation */
+
+.explanation {
+  background: #f8fafc;
+  padding: 18px;
+  border-radius: 10px;
+  color: #6b7280;
+}
+
+/* Data Detective */
+
+.insight {
+  display: flex;
+  gap: 15px;
+  background: #fff7ed;
+  padding: 18px;
+  border-radius: 10px;
+}
+
+.insight > span {
+  font-size: 28px;
+}
+
+.insight strong {
+  font-size: 16px;
+}
+
+.insight p {
+  margin-top: 6px;
+  color: #6b7280;
+}
+
+/* Suggested Questions */
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.suggestions button {
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+/* Mobile */
+
+@media (max-width: 700px) {
+  .dashboard {
+    width: 92%;
+  }
+
+  .header {
+    padding: 25px 5%;
+  }
+
+  .header h1 {
+    font-size: 26px;
+  }
+
+  .stats {
+    grid-template-columns: 1fr;
+  }
+
+  .question-input {
+    flex-direction: column;
+  }
+
+  .upload-box {
+    padding: 25px;
+  }
+}
