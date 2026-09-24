@@ -1,0 +1,9 @@
+Product,Region,Sales,Units
+Laptop,North,120000,12
+Phone,South,80000,20
+Laptop,South,150000,15
+Tablet,East,60000,10
+Phone,North,90000,22
+Laptop,East,100000,10
+Tablet,South,70000,14
+Phone,East,95000,24
